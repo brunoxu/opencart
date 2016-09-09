@@ -83,7 +83,7 @@ function start(url) {
 					$('.fa-spinner').remove();
 				}
 
-				step++;
+				if (! json.is_part) step++;
 			},
 			error: function(xhr, ajaxOptions, thrownError) {
 				$('#progress-bar').addClass('progress-bar-danger');

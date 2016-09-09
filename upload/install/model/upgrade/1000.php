@@ -1,168 +1,201 @@
 <?php
 class ModelUpgrade1000 extends Model {
-	public function upgrade() {
+	public $part = 1;
+	public $part_size = 20;
+
+	public function upgrade($part = 1) {
+		$this->part = (int)$part;
+		if ($this->part <= 0) $this->part = 1;
+
 		// This is a generic upgrade script.
 		// It makes mass changes to the DB by creating tables that are not in the current db, changes the charset and DB engine to the SQL schema.
 		// The uprade script is not coherent because of the changes over time to the upgrades so im grouping the changes into different files
 		// Future version should have a upgrade file name that matches the version number being changed to
 
-		// Load the sql file
-		$file = DIR_APPLICATION . 'opencart.sql';
+		$upgrade_token = $this->session->data['upgrade_token'];
+		if (empty($upgrade_token)) die('invalid request!');
 
-		if (!file_exists($file)) {
-			exit('Could not load sql file: ' . $file);
-		}
+		$table_new_data = $this->cache->get('table_new_data'.$upgrade_token);
+		$table_old_data = $this->cache->get('table_old_data'.$upgrade_token);
 
-		$string = '';
+		if (empty($table_new_data) || empty($table_old_data)) {
+			// Load the sql file
+			$file = DIR_APPLICATION . 'opencart.sql';
 
-		$lines = file($file);
-
-		$status = false;
-
-		// Get only the create statements
-		foreach($lines as $line) {
-			// Set any prefix
-			$line = str_replace("DROP TABLE IF EXISTS `oc_", "DROP TABLE IF EXISTS `" . DB_PREFIX, $line);
-
-			$line = str_replace("CREATE TABLE IF NOT EXISTS `oc_", "CREATE TABLE `" . DB_PREFIX, $line);
-
-			$line = str_replace("CREATE TABLE `oc_", "CREATE TABLE `" . DB_PREFIX, $line);
-
-			// If line begins with create table we want to start recording
-			if (substr($line, 0, 12) == 'CREATE TABLE') {
-				$status = true;
+			if (!file_exists($file)) {
+				exit('Could not load sql file: ' . $file);
 			}
 
-			if ($status) {
-				$string .= $line;
-			}
+			$string = '';
 
-			// If line contains with ; we want to stop recording
-			if (preg_match('/;/', $line)) {
-				$status = false;
-			}
-		}
+			$lines = file($file);
 
-		$table_new_data = array();
+			$status = false;
 
-		// Trim any spaces
-		$string = trim($string);
+			// Get only the create statements
+			foreach($lines as $line) {
+				// Set any prefix
+				$line = str_replace("DROP TABLE IF EXISTS `oc_", "DROP TABLE IF EXISTS `" . DB_PREFIX, $line);
 
-		// Trim any ;
-		$string = trim($string, ';');
+				$line = str_replace("CREATE TABLE IF NOT EXISTS `oc_", "CREATE TABLE `" . DB_PREFIX, $line);
 
-		// Start reading each create statement
-		$statements = explode(';', $string);
+				$line = str_replace("CREATE TABLE `oc_", "CREATE TABLE `" . DB_PREFIX, $line);
 
-		foreach ($statements as $sql) {
-			// Get all fields
-			$field_data = array();
+				// If line begins with create table we want to start recording
+				if (substr($line, 0, 12) == 'CREATE TABLE') {
+					$status = true;
+				}
 
-			preg_match_all('#`(\w[\w\d]*)`\s+((tinyint|smallint|mediumint|bigint|int|tinytext|text|mediumtext|longtext|tinyblob|blob|mediumblob|longblob|varchar|char|datetime|date|float|double|decimal|timestamp|time|year|enum|set|binary|varbinary)(\((.*)\))?){1}\s*(collate (\w+)\s*)?(unsigned\s*)?((NOT\s*NULL\s*)|(NULL\s*))?(auto_increment\s*)?(default \'([^\']*)\'\s*)?#i', $sql, $match);
+				if ($status) {
+					$string .= $line;
+				}
 
-			foreach(array_keys($match[0]) as $key) {
-				$field_data[] = array(
-					'name'          => trim($match[1][$key]),
-					'type'          => strtoupper(trim($match[3][$key])),
-					'size'          => str_replace(array('(', ')'), '', trim($match[4][$key])),
-					'sizeext'       => trim($match[6][$key]),
-					'collation'     => trim($match[7][$key]),
-					'unsigned'      => trim($match[8][$key]),
-					'notnull'       => trim($match[9][$key]),
-					'autoincrement' => trim($match[12][$key]),
-					'default'       => trim($match[14][$key])
-				);
-			}
-
-			// Get primary keys
-			$primary_data = array();
-
-			preg_match('#primary\s*key\s*\([^)]+\)#i', $sql, $match);
-
-			if (isset($match[0])) {
-				preg_match_all('#`(\w[\w\d]*)`#', $match[0], $match);
-			} else{
-				$match = array();
-			}
-
-			if ($match) {
-				foreach($match[1] as $primary) {
-					$primary_data[] = $primary;
+				// If line contains with ; we want to stop recording
+				if (preg_match('/;/', $line)) {
+					$status = false;
 				}
 			}
 
-			// Get indexes
-			$index_data = array();
+			$table_new_data = array();
 
-			$indexes = array();
+			// Trim any spaces
+			$string = trim($string);
 
-			preg_match_all('#key\s*`\w[\w\d]*`\s*\(.*\)#i', $sql, $match);
+			// Trim any ;
+			$string = trim($string, ';');
 
-			foreach($match[0] as $key) {
-				preg_match_all('#`(\w[\w\d]*)`#', $key, $match);
+			// Start reading each create statement
+			$statements = explode(';', $string);
 
-				$indexes[] = $match;
-			}
+			foreach ($statements as $sql) {
+				// Get all fields
+				$field_data = array();
 
-			foreach($indexes as $index) {
-				$key = '';
+				preg_match_all('#`(\w[\w\d]*)`\s+((tinyint|smallint|mediumint|bigint|int|tinytext|text|mediumtext|longtext|tinyblob|blob|mediumblob|longblob|varchar|char|datetime|date|float|double|decimal|timestamp|time|year|enum|set|binary|varbinary)(\((.*)\))?){1}\s*(collate (\w+)\s*)?(unsigned\s*)?((NOT\s*NULL\s*)|(NULL\s*))?(auto_increment\s*)?(default \'([^\']*)\'\s*)?#i', $sql, $match);
 
-				foreach($index[1] as $field) {
-					if ($key == '') {
-						$key = $field;
-					} else{
-						$index_data[$key][] = $field;
+				foreach(array_keys($match[0]) as $key) {
+					$field_data[] = array(
+						'name'          => trim($match[1][$key]),
+						'type'          => strtoupper(trim($match[3][$key])),
+						'size'          => str_replace(array('(', ')'), '', trim($match[4][$key])),
+						'sizeext'       => trim($match[6][$key]),
+						'collation'     => trim($match[7][$key]),
+						'unsigned'      => trim($match[8][$key]),
+						'notnull'       => trim($match[9][$key]),
+						'autoincrement' => trim($match[12][$key]),
+						'default'       => trim($match[14][$key])
+					);
+				}
+
+				// Get primary keys
+				$primary_data = array();
+
+				preg_match('#primary\s*key\s*\([^)]+\)#i', $sql, $match);
+
+				if (isset($match[0])) {
+					preg_match_all('#`(\w[\w\d]*)`#', $match[0], $match);
+				} else{
+					$match = array();
+				}
+
+				if ($match) {
+					foreach($match[1] as $primary) {
+						$primary_data[] = $primary;
 					}
 				}
-			}
 
-			// Table options
-			$option_data = array();
+				// Get indexes
+				$index_data = array();
 
-			preg_match_all('#(\w+)=\'?(\w+\~?\w+)\'?#', $sql, $option);
+				$indexes = array();
 
-			foreach(array_keys($option[0]) as $key) {
-				$option_data[$option[1][$key]] = $option[2][$key];
-			}
+				preg_match_all('#key\s*`\w[\w\d]*`\s*\(.*\)#i', $sql, $match);
 
-			// Get Table Name
-			preg_match_all('#create\s*table\s*`(\w[\w\d]*)`#i', $sql, $table);
+				foreach($match[0] as $key) {
+					preg_match_all('#`(\w[\w\d]*)`#', $key, $match);
 
-			if (isset($table[1][0])) {
-				$table_new_data[] = array(
-					'sql'     => $sql,
-					'name'    => $table[1][0],
-					'field'   => $field_data,
-					'primary' => $primary_data,
-					'index'   => $index_data,
-					'option'  => $option_data
-				);
-			}
-		}
-
-		// Get all current tables, fields, type, size, etc..
-		$table_old_data = array();
-
-		$table_query = $this->db->query("SHOW TABLES FROM `" . DB_DATABASE . "`");
-
-		foreach ($table_query->rows as $table) {
-			if (utf8_substr($table['Tables_in_' . DB_DATABASE], 0, strlen(DB_PREFIX)) == DB_PREFIX) {
-				$field_data = array();
-				$extended_field_data = array();
-
-				$field_query = $this->db->query("SHOW COLUMNS FROM `" . $table['Tables_in_' . DB_DATABASE] . "`");
-
-				foreach ($field_query->rows as $field) {
-					$field_data[] = $field['Field'];
-					$extended_field_data[] = $field;
+					$indexes[] = $match;
 				}
 
-				$table_old_data[$table['Tables_in_' . DB_DATABASE]]['field_list'] = $field_data;
-				$table_old_data[$table['Tables_in_' . DB_DATABASE]]['extended_field_data'] = $extended_field_data;
+				foreach($indexes as $index) {
+					$key = '';
+
+					foreach($index[1] as $field) {
+						if ($key == '') {
+							$key = $field;
+						} else{
+							$index_data[$key][] = $field;
+						}
+					}
+				}
+
+				// Table options
+				$option_data = array();
+
+				preg_match_all('#(\w+)=\'?(\w+\~?\w+)\'?#', $sql, $option);
+
+				foreach(array_keys($option[0]) as $key) {
+					$option_data[$option[1][$key]] = $option[2][$key];
+				}
+
+				// Get Table Name
+				preg_match_all('#create\s*table\s*`(\w[\w\d]*)`#i', $sql, $table);
+
+				if (isset($table[1][0])) {
+					$table_new_data[] = array(
+						'sql'     => $sql,
+						'name'    => $table[1][0],
+						'field'   => $field_data,
+						'primary' => $primary_data,
+						'index'   => $index_data,
+						'option'  => $option_data
+					);
+				}
 			}
+
+			$this->cache->set('table_new_data'.$upgrade_token, $table_new_data);
+
+			// Get all current tables, fields, type, size, etc..
+			$table_old_data = array();
+
+			$table_query = $this->db->query("SHOW TABLES FROM `" . DB_DATABASE . "`");
+
+			foreach ($table_query->rows as $table) {
+				if (utf8_substr($table['Tables_in_' . DB_DATABASE], 0, strlen(DB_PREFIX)) == DB_PREFIX) {
+					$field_data = array();
+					$extended_field_data = array();
+
+					$field_query = $this->db->query("SHOW COLUMNS FROM `" . $table['Tables_in_' . DB_DATABASE] . "`");
+
+					foreach ($field_query->rows as $field) {
+						$field_data[] = $field['Field'];
+						$extended_field_data[] = $field;
+					}
+
+					$table_old_data[$table['Tables_in_' . DB_DATABASE]]['field_list'] = $field_data;
+					$table_old_data[$table['Tables_in_' . DB_DATABASE]]['extended_field_data'] = $extended_field_data;
+				}
+			}
+
+			$this->cache->set('table_old_data'.$upgrade_token, $table_old_data);
 		}
 
-		foreach ($table_new_data as $table) {
+		$tables_count = count($table_new_data);
+		$total_parts = ceil($tables_count / $this->part_size);
+		$start_index = ($this->part - 1) * $this->part_size;
+		$end_index = $this->part * $this->part_size;
+		if ($this->part > $total_parts) {
+			return;
+		}
+
+		foreach ($table_new_data as $ind=>$table) {
+			if ($ind < $start_index) {
+				continue;
+			}
+			if ($ind >= $end_index) {
+				break;
+			}
+
 			// If table is not found create it
 			if (!isset($table_old_data[$table['name']])) {
 				$this->db->query($table['sql']);
@@ -340,5 +373,7 @@ class ModelUpgrade1000 extends Model {
 				}
 			}
 		}
+
+		if ($this->part < $total_parts) return $this->part + 1;
 	}
 }
