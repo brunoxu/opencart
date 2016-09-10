@@ -162,6 +162,13 @@ class ModelUpgrade1000 extends Model {
 			}
 		}
 
+		// Get status of current tables
+		$table_query = $this->db->query("SHOW TABLE STATUS FROM `" . DB_DATABASE . "`");
+		foreach ($table_query->rows as $table) {
+			if (empty($table_old_data[$table['Name']])) continue;
+			$table_old_data[$table['Name']]['status'] = $table;
+		}
+
 		foreach ($table_new_data as $table) {
 			// If table is not found create it
 			if (!isset($table_old_data[$table['name']])) {
@@ -169,18 +176,38 @@ class ModelUpgrade1000 extends Model {
 			} else {
 				// DB Engine
 				if (isset($table['option']['ENGINE'])) {
-					$this->db->query("ALTER TABLE `" . $table['name'] . "` ENGINE = `" . $table['option']['ENGINE'] . "`");
+					$status = false;
+					if (empty($table_old_data[$table['name']]['status'])) {
+						$status = true;
+					} elseif ($table['option']['ENGINE'] != $table_old_data[$table['name']]['status']['Engine']) {
+						$status = true;
+					}
+					if ($status) {
+						$this->db->query("ALTER TABLE `" . $table['name'] . "` ENGINE = `" . $table['option']['ENGINE'] . "`");
+					}
 				}
 
 				// Charset
-				if (isset($table['option']['CHARSET']) && isset($table['option']['COLLATE'])) {
-					$this->db->query("ALTER TABLE `" . $table['name'] . "` DEFAULT CHARACTER SET `" . $table['option']['CHARSET'] . "` COLLATE `" . $table['option']['COLLATE'] . "`");
+				if (isset($table['option']['CHARSET'])) {
+					$status = false;
+					if (empty($table_old_data[$table['name']]['status'])) {
+						$status = true;
+					} else {
+						if (!isset($table['option']['COLLATE']) && !stristr($table_old_data[$table['name']]['status']['Collation'], $table['option']['CHARSET'])) {
+							$status = true;
+						} elseif (isset($table['option']['COLLATE']) && ($table['option']['COLLATE'] != $table_old_data[$table['name']]['status']['Collation'])) {
+							$status = true;
+						}
+					}
+					if ($status) {
+						$this->db->query("ALTER TABLE `" . $table['name'] . "` DEFAULT CHARACTER SET `" . $table['option']['CHARSET'] . "`".(isset($table['option']['COLLATE'])?(" COLLATE `" . $table['option']['COLLATE'] . "`"):''));
+					}
 				}
 
 				// Loop through all tables and adjust based on opencart.sql file
 				$i = 0;
 
-				foreach ($table['field'] as $field) {
+				foreach ($table['field'] as $ind=>$field) {
 
 					// If field is not found create it
 					if (!in_array($field['name'], $table_old_data[$table['name']]['field_list'])) {
@@ -226,36 +253,64 @@ class ModelUpgrade1000 extends Model {
 
 						$this->db->query($sql);
 					} else {
-						// Remove auto increment from all fields
-						$sql = "ALTER TABLE `" . $table['name'] . "` CHANGE `" . $field['name'] . "` `" . $field['name'] . "` " . strtoupper($field['type']);
+						$status = false;
 
-						if ($field['size']) {
-							$sql .= "(" . $field['size'] . ")";
-						}
-
-						if ($field['collation']) {
-							$sql .= " " . $field['collation'];
-						}
-
-						if ($field['unsigned']) {
-							$sql .= " " . $field['unsigned'];
-						}
-
-						if ($field['notnull']) {
-							$sql .= " " . $field['notnull'];
-						}
-
-						if ($field['default'] != '') {
-							$sql .= " DEFAULT '" . $field['default'] . "'";
-						}
-
-						if (isset($table['field'][$i - 1])) {
-							$sql .= " AFTER `" . $table['field'][$i - 1]['name'] . "`";
+						if ($field['name'] != $table_old_data[$table['name']]['field_list'][$ind]) {
+							$status = true;
+						} elseif ($table_old_data[$table['name']]['extended_field_data'][$ind]['Extra']=='auto_increment') {
+							$status = true;
 						} else {
-							$sql .= " FIRST";
+							$field_type_new = $field['type'] . ($field['size']?('('.$field['size'].')'):'');
+							$field_type_old = $table_old_data[$table['name']]['extended_field_data'][$ind]['Type'];
+							if (strtolower($field_type_new) != strtolower($field_type_old)) {
+								$status = true;
+							}
+							if (($field['notnull']=='NOT NULL') && ($table_old_data[$table['name']]['extended_field_data'][$ind]['Null']!='NO')) {
+								$status = true;
+							}
+							if (($field['notnull']=='NULL') && ($table_old_data[$table['name']]['extended_field_data'][$ind]['Null']!='YES')) {
+								$status = true;
+							}
+							if (($field['default']=='') && ($table_old_data[$table['name']]['extended_field_data'][$ind]['Default']!=NULL)) {
+								$status = true;
+							}
+							if (($field['default']!='') && ($field['default']!=$table_old_data[$table['name']]['extended_field_data'][$ind]['Default'])) {
+								$status = true;
+							}
 						}
 
-						$this->db->query($sql);
+						if ($status) {
+							// Remove auto increment from all fields
+							$sql = "ALTER TABLE `" . $table['name'] . "` CHANGE `" . $field['name'] . "` `" . $field['name'] . "` " . strtoupper($field['type']);
+
+							if ($field['size']) {
+								$sql .= "(" . $field['size'] . ")";
+							}
+
+							if ($field['collation']) {
+								$sql .= " " . $field['collation'];
+							}
+
+							if ($field['unsigned']) {
+								$sql .= " " . $field['unsigned'];
+							}
+
+							if ($field['notnull']) {
+								$sql .= " " . $field['notnull'];
+							}
+
+							if ($field['default'] != '') {
+								$sql .= " DEFAULT '" . $field['default'] . "'";
+							}
+
+							if (isset($table['field'][$i - 1])) {
+								$sql .= " AFTER `" . $table['field'][$i - 1]['name'] . "`";
+							} else {
+								$sql .= " FIRST";
+							}
+
+							$this->db->query($sql);
+						}
 					}
 
 					$i++;
