@@ -255,7 +255,9 @@ class ModelUpgrade1000 extends Model {
 					} else {
 						$status = false;
 
-						if ($field['name'] != $table_old_data[$table['name']]['field_list'][$ind]) {
+						if (empty($table_old_data[$table['name']]['field_list'][$ind])) {
+							$status = true;
+						} elseif ($field['name'] != $table_old_data[$table['name']]['field_list'][$ind]) {
 							$status = true;
 						} elseif ($table_old_data[$table['name']]['extended_field_data'][$ind]['Extra']=='auto_increment') {
 							$status = true;
